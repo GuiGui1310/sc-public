@@ -20,15 +20,17 @@ class ColumnStoreLowering(override val IR: RelationDSLOpsPackaged, override val 
   type LoweredRelation = Rep[Array[Col]]
   
   def relationScan(scanner: Rep[RelationScanner], schema: Schema, size: Rep[Int], resultSchema: Schema): LoweredRelation = {
-	def nbColumn = schema.size
+	val nbColumn = schema.size
 	dsl"""
 		val bigArray = new Array[Col]($nbColumn)
-		for (i <- 0 to $size-1){
-			bigArray(i) = new Col($size)
+		for (i <- 0 until $nbColumn){
+			bigArray(i) = new Array[String]($size)
 		}
 		var i = 0
 		while($scanner.hasNext){
-			$schema.columns.map(column => bigArray($schema.indexOf(column))(i) = $scanner.next_String()) 
+			for (column <- $schema.columns){
+				bigArray($schema.indexOf(column))(i) = $scanner.next_string()
+			}
 			i = i + 1
 		}
 		bigArray
@@ -42,11 +44,14 @@ class ColumnStoreLowering(override val IR: RelationDSLOpsPackaged, override val 
     dsl"""
 		val newArr = new Array[Col]($nbColumn)
 		var i = 0
-		for (colName <- $oldSchema){
-			if ($schema.columns.contains(colName)){
-				newArr(i) = arr($oldSchema.indexOf(colName))
-				i = i+1
+		for (colName <- $oldSchema.columns){
+			for (col <- $schema.columns){
+				if (colName == col){
+					newArr(i) = $arr($oldSchema.indexOf(colName))
+					i = i + 1
+				}
 			}
+			
 		}
 		newArr
     """
@@ -54,6 +59,31 @@ class ColumnStoreLowering(override val IR: RelationDSLOpsPackaged, override val 
   
   def relationSelect(relation: Rep[Relation], field: String, value: Rep[String], resultSchema: Schema): LoweredRelation = {
     val arr = getRelationLowered(relation)
+    val schema = getRelationSchema(relation)
+    val index = schema.indexOf(field)
+    val nbColumn = schema.size
+	dsl"""
+		var size = 0
+		for (elem <- $arr($index)){
+			if (elem == $value){
+				size = size + 1
+			}
+		}
+		val newArray = new Array[Col]($nbColumn)
+		for (i <- 0 until $nbColumn){
+			newArray(i) = new Array[String](size)
+		}
+		var k = 0
+		for (i <- 0 until $arr(index).length){
+			if ($value == $arr($index)(i)){
+				for (j <- 0 until $nbColumn){
+					newArray(j)(k) = $arr(j)(i)
+				}
+				k = k + 1
+			}
+		}
+		newArray
+     """
   }
   
   def relationJoin(leftRelation: Rep[Relation], rightRelation: Rep[Relation], leftKey: String, rightKey: String, resultSchema: Schema): LoweredRelation = {
